@@ -1,0 +1,3 @@
+The TomTom Mkii Bluetooth GPS receiver does not automatically turn on when power is applied via its charging port. The power button must be held for approximately 1 second to toggle it on/off. This program is intented to be used with an ardunio with an I/O pin connected to one of the leads of the power button to simulate a power button press and turn the device on as soon as power is applied to the charging port and also turn the device off when power is removed from the charging port.
+
+Also this program will wake the GPS unit periodically so that it can maintain a good GPS lock. (the unit automatically turns itself off after 5 minutes if it is not connected to anything via bluetooth, so the battery will not be used very much) 
