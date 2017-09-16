@@ -1,0 +1,304 @@
+v = I * r
+
+I = 0.2ma
+
+v = 5v
+
+5 = 0.0002 * r
+
+
+button leads:
+outer pins always 5v when power is applied
+inner pins goto ~4.4-4.6v when button is pressed
+current flowing when shorting button leads thru ammeter is 0.2ma
+max dc current per I/O pin is 40ma (https://www.arduino.cc/en/Main/ArduinoBoardProMini)
+
+removed battery
+got gps fix
+unplugged 5v ac power
+waited 5min
+plugged in power
+took 4min to get gps fix...
+got fix, unplugged for 1 min, then it took 2 mins to get fix
+
+put battery back in
+took a long time to get fix
+powered off for 30 sec, powered on and took a couple seconds to get fix
+powered off for 5 mins, powered on and took 5 seconds to get fix
+
+removed battery
+plugged in to ac power
+took ~5mins to get fix
+disconnected dc power plug from gps unit for ~1sec, plugged back in and took 1m30s to get fix
+disconnected dc power plug from gps unit for 30sec, plugged back in and took 6mins to get fix
+disconnected power plug from wall for ~1sec, plugged back in and took ~2min to get fix
+
+put battery back in
+took ~10-13mins(gave up waiting and left...) to get fix
+powered off(via button)(still plugged in to ac power) for 30 sec, powered on and took 5sec to get fix
+powered off(via button)(still plugged in to ac power) for 5 mins, powered on and took 6mins to get fix
+	but i forgot to connect phone so it auto-powered-off after 5 mins...
+	did it again and it got fix in like 5 secs...
+powered off(via button)(NOT plugged in to ac power) for 30 sec, powered on and took 5sec to get fix
+powered off(via button)(NOT plugged in to ac power) for 5 min, powered on and took 5sec to get fix
+powered off(via button)(NOT plugged in to ac power) for 42 min, powered on and took 5sec to get fix
+
+
+will need to:
+power arduino from gps unit's battery
+	just find 5v somewhere
+	can steal from other lead of button?? (since this has 5v when battery is installed and power is not connected)
+	BUT if arduino is powered from battery then need to figure out how much it will drain...
+		can look up information about how to minimize the drain
+detect 5v from power adaptor with an I/O pin
+then whenever power is lost simulate button press to turn gps unit off
+
+check out low power tips (http://www.home-automation-community.com/arduino-low-power-how-to-run-atmega328p-for-a-year-on-coin-cell-battery/)
+	maybe remove power LED and/or regulator??
+use low power library to save battery
+	https://github.com/rocketscream/Low-Power/blob/master/Examples/powerDownWakeExternalInterrupt/powerDownWakeExternalInterrupt.ino
+use interrupt with CHANGE mode https://www.arduino.cc/en/Reference/AttachInterrupt
+	on power plug pin to detect change in power plugged->unplugged, unplugged->plugged
+have input pin connected to power plug (for interrupt) and also to some part of internal circuit that is only powered when GPS unit is in "ON" state (when green light is on (or blinking))
+then every time CHANGE interrupt is triggered for change in power plug state, check for mismatch between power plug state and "ON" state of internal circuit and if mismatched then press_power_button()
+since docs say that delay()/mills() won't work inside interrupt function, will have to set a flag or something that will cause press_power_button() to happen later
+	might want to make this flag a counter in case miltiple CHANGE(s) of power plug interrupt happen before a single press_power_button() can complete; this way they will sort of be "queued" up and the final state  of power should be correct
+
+problem: interrupt for CHANGE on input power triggers MANY multiple times
+might want to use low power sleep code and just use CHANGE interrupt to wake up
+	first detatch interrupt, then debounce input power pin state, then do inputpower-gpspower state check and do button press
+
+don't use unsigned for timer vars (delete "unsigned")
+in case of millis() rollover: if millis()-debounce/whatever var: set debounce/whatever var = millis() again
+	also need to handle for sleep time start
+check what type millis() returns
+	docs say type is unsigned long
+	what result do you get when you do (lower.unsigned.int - higher.unsigned.int) ?? , can test in computer c++ ??
+		tested this ON WINDOWS PC C++, unsigned 1 - unsigned 2 = 4294967295, so some huge number...
+		NEED TO TEST subtracting big number from small number on ARDUINO HARDWARE and also casting result as (int)
+search for millis() rollover solution/code...
+can test final code for rollover handling by manually replacing millis() with lower number? (but just one time in loop...use flag or something)
+	of make test_millis() and add huge number to millis() so it will roll over soon
+
+according to https://www.baldengineer.com/arduino-how-do-you-reset-millis.html rollover is "handled" automatically if you just do (unsigned long)(var_b - var_a)
+but what if millis() rolls over and then goes like 1ms past the delay var...then it will think that only 1ms has passed when it is really (unsigned long) + 1 ms
+maybe JUST init all time vars after wakeup?? (no can't do this b/c can't init millis()...)
+I do not think that this will be a problem because sleeptimestart and debouncetimestart are re-set after wakeup
+
+NEED TO CHECK what gpspowerpin (yellow) voltage does when green LED is flashing (when gps has fix)...does it stay HIGH as long as gps circuit is powered on or does it change when led flashes?
+	checked: it is consistant 3.3v when LED is flashing when it has a fix
+
+
+pad9 and pad12 (under battery) will be 0v if "off" and ~3.34v if "ON" if plugged in to power or not
+
+
+
+wires:
+black:	[pin GND] +GND (from power plug)
+red: 	[pin 2] +V from power plug
+blue: 	[pin 4] power button (sense lead, set to HIGH to simulate button press)
+yellow:	[pin 5] 3.3v when "ON", 0v when "OFF"
+purple:	[pin VCC] power button (powered lead, ~4.14v when "OFF", ~3.9v when "ON")
+	(will use this to power arduino)10
+
+make longer wires coming out of gps unit
+make them go into single connector
+remove pins on other side (where required pin#2 for interrupt is)
+just put one right-angle pin on pin#2
+remove power led
+remove power regulator?
+
+problem:
+when turing car to ACC(by not holding down clutch) and then going to ON(starting engine), the phone fails to connect
+what happens is that when going from OFF to ACC, the gps unit will get turned on, and then when going from ACC to ON it will loose power for a brief time (appears to be ~1/2sec?) and get turned off and then regain power and get turned on again
+so power states are changed correctly but I think that the phone is trying to connect during the brief ~1/2sec power of period
+will try:
+changing debounce delay from 100msec to longer than the brief power off (so greater than ~500msec?)
+
+problem:
+when turning car off (engine running->OFF) sometimes gps will fail to power off
+need to pay attention to sleep LED to see if it ever turns on when this occurs...(does CHANGE interrupt for inputpowerpin happen?) (it must not??)
+I had removed 10k pulldown resistor from inputpowerpin before installing in car b/c i had thought it was not necessary
+will try:
+now I have reinstalled 10k pulldown resistor on inputpowerpin
+will see if this still occurs...
+
+
+
+can maybe have it wake up for a while every hour or so to get a better fix/take less time to get a fix later??
+would have to use lo power library to make it periodically wake up
+looks like longest time it can sleep for it 8seconds?
+would have to have it wake up every 8sec and increment something to be able to turn on gps every hour??
+I assume millis() pauses when it is asleep??
+does interrupt also wake it up when it is sleeping for 8sec??
+	hope it does or it won't work... (yes it does, tested this)
+each 8sec wakeup:
+	have it inc counter(to 1-2hrs or w/e)
+	then if it hits 1-2hr limit then
+		turn on gps for a few (5?) minutes
+			check gpspowerpin state: if off then press power button
+		go to sleep again until time to turn it off??
+		(can't be more than 5 mins b/c of auto power off...)
+			maybe letting it auto-power off is the simplest option???
+		reset timer/incrementer
+	don't do anything else like check power state pins to save power (does this save power?? can't find any info that says it does)
+	then sleep for 8sec again
+for each powerpin CHANGE interrupt
+	do normal gpspowerpin state check and power button press if needed
+
+
+implemented this; made it wake up about every hour and turn on GPS (let it turn itself off after 5mins of no connection)
+when testing this first had it wake up every 6mins so I could watch it and see what happened
+	(I set it to do 45 loops of 8sec sleep b/c 6min=360sec and 360/8=45)
+noticed that it woke up in about 6min:30sec instead of 6 mins
+there is very little code that runs other than the 8sec sleep so I wouldn't expect it to take so much longer...
+I should make it turn on LED whenever it wakes for each 8sec loop just to see how long it is spending awake...
+
+
+in order to have it be on for less time can maybe somehow detect if it has GPS fix and then turn off as soon at it does
+(because there is probably no benefit to keeping it on longer once it already has a fix??)
+would have to detect blinking of LED?? unless I could randomly find some other signal somewhere inside that indicated GPS fix
+
+
+also maybe could have arduino detect battery level and not turn on gps if it gets too low?
+not sure if this would work with current setup b/c it is powered off of battery and I think it uses this voltage for reference of what highest for analog input is?? (so if i used analog input to measure battery voltage it would always see it as the highest value?)
+
+
+gps unit battery always seems to go dead after a while
+with code that was only turning it on/off when power was applied it would last ~a week or two
+with code that turned it on every hour (until it timed out after 5 mins) it would last a few days
+possible causes:
+	- gps unit is unable to be turned on and charge battery at the same time (because I am never giving it power without it being turned on)
+		this could be caused by arduino being attached??
+
+	- arduino is using too much power (even when in sleep mode) and draining battery when car is off and power is not applied
+	- battery is draining on its own when car is off and power is not applied
+
+trying to measure battery level
+with battery nearly dead (red LED on), purple wire measured 3.61 volts
+	when charging it seems to stay at ~4v but if i stop charging then i can see that this voltage goes to a bit higher than ~3.6v
+	so i guess I can only see battery voltage level from this wire when not charging??
+	will let it charge for a few hours and then stop charging and check voltage = ___
+then when it is fully charged I will run it without arduino attached and see if it can maintain full battery level for a week or so (or at least not have battery voltage go down)
+
+am running gps unit in car without arduino attached
+checking voltage level
+3.95v
+after driving for a few mins with gps unit turned on it went up slightly to 3.96v
+after doing this a few more times can see it always go up by about 0.01v, now it is at 3.98v
+fully charged it is at 4.16v, (unplugged from power and gps off)
+	3.85v unplugged and gps on
+so it seems like it can keep charging the battery with short drives and short off times in-between at least...
+left off overnight fully charged and it was at 4.15v, so really not discharging at all...
+	more checking(still not charging and gps off): 8:15pm=4.15v, next morning 6:15am=4.15v
+	drove to work, after i got there still @ 4.15v, also orange charge LED never turned on
+	so it must be running the GPS off of the power plug and not using the battery at all and not charging it b/c it is full???
+	manually turned on gps unit when power was not plugged in/on and let it timeout after 5mins
+		battery went from 4.16 to 4.15v
+		turned gps off and turned on power plug and it did not charge...battery not low enough?
+		did another 5mins of gps on and battery went down to 4.14v, then turned gps off and turned on power and it was charging
+		left off overnight, battery still 4.14v, turned on power and it is charging, but then when I turn on GPS it stops charging...wtf...still need to get battery lower to make it keep charging??
+will have to see what it does when left off for a few days...
+
+
+testing arduino power comsumption with a meter
+plugged in to 5v usb power from computer, using 1hr wakeup code
+it's is drawing 51.5mA when awake and 37.5mA when asleep...wtf this is waaaayyy too much.....
+trying old code that only wakes when power changes state....same current draw...wtf
+removed external 10k pulldown resistor from pin 2 in case this is doing something weird (NO pins are connected to ANYTHING except power pin and gnd)...same current draw
+tried example sleep forever code from guy who made sleep library that I am using (powerDownWakeExternalInterrupt.ino)...~40mA..about the same draw...
+tried test code from here http://playground.arduino.cc/Learning/ArduinoSleepCode
+	and same draw...
+this makes no sense...current is way too high...
+maybe this arduino pro mini is broken somehow???...i did fry a few input pins a while back...
+ordered a new one to test for $4...
+
+tried this code http://arduino.stackexchange.com/questions/16024/high-power-consumption-during-power-down-mode
+with old ardunio duemilanove (atmega 168)
+and got it down to 11mA (using 5v pin) used VIN pin and it want down to 9mA
+but tried same code with pro mini and it only went down to ~40mA...
+
+finally got new $4 arduino pro mini
+burned blink program
+current changing between 17-20mA (when led turns on)
+wrote program that does nothing = 17mA
+tried this code http://arduino.stackexchange.com/questions/16024/high-power-consumption-during-power-down-mode
+now down to 3mA
+this is very close to what it is supposed to be according to
+	http://www.home-automation-community.com/arduino-low-power-how-to-run-atmega328p-for-a-year-on-coin-cell-battery/
+woo
+now trying powerDownWakeExternalInterrupt.ino example code from LowPower library
+only down to 7.33mA, weird
+removed attachInterrupt() call that sets up wakeup interrupt
+now down to 3mA
+maybe it was waking up b/c there was no pullup on interrupt pin?
+
+now trying my code for gps thing
+starts at 20mA when awake, then goes down to 3mA when it sleeps, good
+now removing power led and power regulator
+severed power lED trace, now down to 0.27mA when asleep
+removed power regulator, now only down to 0.25mA...was expecting lower...wtf...
+
+need to try powerDownWakeExternalInterrupt.ino code with removed LED and regulator to see if less current...
+tried powerDownWakeExternalInterrupt.ino code with default LOW interrupt and it went down to 4mA (but still had pulldown on this interrupt pin so it must have been triggering constantly?)
+tried powerDownWakeExternalInterrupt.ino code with default LOW interrupt and removed pulldown and still 4mA...could still be triggering with noise??
+tried powerDownWakeExternalInterrupt.ino code with default HIGH interrupt and it went down to 0.1uA...uh this is too low??
+tried with old gps code that uses power_down_forever instead of 8s power down = 0.1uA
+	tried touching interrupt pin (pin2) to 5v and it woke up and slept again OK
+so basically 8s sleep code that turns on the gps every hour used 0.25mA and sleep forever code uses waaaaayyy less (0.1uA)
+but wait...burned 8s sleep gps code again and now it is only using 6.4uA.....wtf...i tried this before and it was 0.25mA...this makes no sense
+	tried touching interrupt pin (pin2) to 5v and it woke up and slept again OK
+tried adding delay after every 8s sleep temporarily to observe power usage, can see it jump up to 16mA and then back down to 6uA
+
+
+installed new aruino pro mini with code to turn on gps unit every 1hr (for 5mins timeout)
+5:18 PM 10/17/2016 battery voltage is 4.14v
+next morning at 9:28 AM 10/18/2016 battery voltage is 4.02v
+	rate is 0.12v/16h = 0.0075v/h
+want to try with old code that does not turn on every 1h to make sure arduino is not draining too much in sleep mode
+starting time 10:46 AM 10/18/2016 and voltage 4.05v
+checked again at 6:45 PM 10/18/2016 (8hs later) and voltage is 4.05v
+so arduino only is drawing nearly nothing, good
+
+switched back to 1hr gps turn on code
+night before work day, 6:55 PM 10/18/2016 battery level is 4.04v
+drove to store and charged to 4.06v 7:46 PM 10/18/2016
+will check to see how battery level changes over the next few days
+next morning battery level is 3.97v 6:08 AM 10/19/2016
+after driving to work battery level is 4.06v, 0634am
+	so basically driving to work exactly charged up the amount that was drained overnight...
+after work before driving home battery level is 3.94v, 718pm
+but stopped to pick up sushi for a few mins, not sure how long...
+after driving home battery level is 4.07v, 756pm
+
+next morning battery level is 3.97v 6:16 AM 10/20/2016
+after getting to work 0641am, 4.06v
+after work 0737pm, 3.93v
+after getting home, 0813pm, 4.04v
+
+next morning battery level is 3.95v 6:29 AM 10/21/2016
+after getting to work 0655am, 4.05v
+after work 726pm, 3.93v
+after getting home, 753pm, 4.02v
+
+discharge rate (for 5min on per hour) is about 0.01v/h
+charge rate is 0.0036v/min, 0.216v/h
+
+
+attempt to figure how long we can keep battery charged:
+manual says:
+battery capacity is 1200mAh
+battery will last for 10 hours of use
+battery will charge in "less than 4 hours" (I will assume 4 hrs)
+so gps power consumption is: 1200(mAh) / I(mA) = 10(h), I = 120mA
+arduino power consumption: 0.25mA, so arduino will consume: 0.25mAh (or now it is really 6uA??(0.006mA))
+charge rate: 1200(mAh) / I(mA) = 4(h), I = 300mA
+so 5mins of gps usage will consume: 120mA * (5m/60m) = 10mAh
+so if we are running the gps for 5mins every hour, total power consumption wil be 10mAh + 0.25mAh = 10.25mAh
+
+how long it will take to charge 10mAh: 300(mAh)/1(h) = 10.25mAh/X(h), [(10.25/300) * 60 (for minutes)], X = 2.05min = 2min3sec
+so if we are running the gps for 5mins every hour, then we will need to charge for 2min3sec for each hour the car is off
+(this is assuming that the charge rate is still 300(mAh)/1(h) even when the gps unit is on which may not be true...)
+so for 12hrs at work, we would need 24.6min to charge
+	this is probably just barely as long as my commute...not sure this is enough to keep battery charged...
+	might have to switch to turning on gps once every 2 hours?
